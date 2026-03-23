@@ -2,18 +2,18 @@
 import telebot
 import json
 import time
-import openai
+import google.generativeai as genai
 from flask import Flask
 from threading import Thread
 
-# ========== НАСТРОЙКИ - ВСТАВЬТЕ СВОИ ДАННЫЕ ==========
+# ========== НАСТРОЙКИ ==========
 TELEGRAM_TOKEN = "8704823023:AAGQgsQ6isAm7Da4EasFhQ3p8c2nW4sM02w"
-DEEPSEEK_API_KEY = "sk-98d14b90cff74218b4658a5c095b28ef"
-# ====================================================
+GEMINI_API_KEY = "AIzaSyBDTN-5avqFIOng-sW9PF0Srv2f9L7wtIU"
+# ================================
 
-# Настройка OpenAI для DeepSeek
-openai.api_key = DEEPSEEK_API_KEY
-openai.api_base = "https://api.deepseek.com/v1"
+# Настройка Gemini
+genai.configure(api_key=GEMINI_API_KEY)
+model = genai.GenerativeModel('gemini-1.5-flash')
 
 # === Веб-сервер для keep-alive ===
 app = Flask(__name__)
@@ -84,56 +84,40 @@ SYSTEM_PROMPT = """
 def handle_message(message):
     user_question = message.text
     
-    # Показываем, что бот печатает
     try:
         bot.send_chat_action(message.chat.id, 'typing')
     except:
         pass
     
-    # Ищем в базе знаний
     relevant_info = search_knowledge(user_question, knowledge_base)
     
     if not relevant_info:
-        answer = "Извините, я не нашла информации по вашему вопросу в материалах курса. Вы можете написать на почту или задать вопрос в поддержку. Будем рады помочь!"
-        try:
-            bot.reply_to(message, answer)
-        except:
-            pass
+        answer = "Извините, я не нашла информации по вашему вопросу. Напишите в поддержку!"
+        bot.reply_to(message, answer)
         return
     
-    # Формируем контекст
     context = "\n\n---\n\n".join(relevant_info)
     
     try:
-        print(f"📤 Отправка запроса в DeepSeek...")
+        print(f"📤 Отправка запроса в Gemini...")
         
-        response = openai.ChatCompletion.create(
-            model="deepseek-chat",
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT + "\n\nКонтекст с сайта:\n" + context},
-                {"role": "user", "content": user_question}
-            ],
-            temperature=0.7,
-            max_tokens=600
-        )
+        prompt = SYSTEM_PROMPT + f"\n\nКонтекст с сайта:\n{context}\n\nВопрос пользователя: {user_question}"
+        response = model.generate_content(prompt)
         
-        print(f"✅ DeepSeek ответил успешно")
-        answer = response.choices[0].message.content
+        print(f"✅ Gemini ответил")
+        answer = response.text
         bot.reply_to(message, answer)
         
     except Exception as e:
-        print(f"❌ ОШИБКА DeepSeek: {e}")
-        print(f"❌ Тип ошибки: {type(e).__name__}")
+        print(f"❌ ОШИБКА Gemini: {e}")
         bot.reply_to(message, f"Вот что я нашла в материалах курса:\n\n{relevant_info[0]}")
 
 # === Запуск бота ===
 if __name__ == "__main__":
-    # Запускаем веб-сервер для keep-alive
     keep_alive()
     print("🤖 Бот Екатерины Храмовой запущен!")
     print("🌐 Веб-сервер для пингов работает на порту 8080")
     
-    # Запускаем бота с автоматическим переподключением
     while True:
         try:
             bot.infinity_polling(timeout=60, long_polling_timeout=60)
