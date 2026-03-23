@@ -2,16 +2,20 @@
 import telebot
 import json
 import time
-from openai import OpenAI
+import openai
 from flask import Flask
 from threading import Thread
 
-# ========== НАСТРОЙКИ ==========
+# ========== НАСТРОЙКИ - ВСТАВЬТЕ СВОИ ДАННЫЕ ==========
 TELEGRAM_TOKEN = "8704823023:AAGQgsQ6isAm7Da4EasFhQ3p8c2nW4sM02w"
 DEEPSEEK_API_KEY = "sk-98d14b90cff74218b4658a5c095b28ef"
-# ================================
+# ====================================================
 
-# === Веб-сервер для keep-alive (чтобы бот не засыпал) ===
+# Настройка OpenAI для DeepSeek
+openai.api_key = DEEPSEEK_API_KEY
+openai.api_base = "https://api.deepseek.com/v1"
+
+# === Веб-сервер для keep-alive ===
 app = Flask(__name__)
 
 @app.route('/')
@@ -63,7 +67,6 @@ def search_knowledge(query, knowledge_base):
 
 # === Инициализация бота ===
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
-client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url='https://api.deepseek.com')
 knowledge_base = load_knowledge_base()
 
 SYSTEM_PROMPT = """
@@ -102,7 +105,7 @@ def handle_message(message):
     context = "\n\n---\n\n".join(relevant_info)
     
     try:
-        response = client.chat.completions.create(
+        response = openai.ChatCompletion.create(
             model="deepseek-chat",
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT + "\n\nКонтекст с сайта:\n" + context},
