@@ -101,6 +101,10 @@ SYSTEM_PROMPT = """
 
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
+    # ========== ЛОГ 1: сообщение получено ==========
+    print(f"📩 ПОЛУЧЕНО СООБЩЕНИЕ от {message.from_user.id}: {message.text}")
+    # ==============================================
+    
     user_question = message.text
     
     try:
@@ -110,6 +114,10 @@ def handle_message(message):
     
     # Ищем в базе знаний
     relevant_info = search_knowledge(user_question, knowledge_base)
+    
+    # ========== ЛОГ 2: результат поиска ==========
+    print(f"🔍 Найдено блоков: {len(relevant_info) if relevant_info else 0}")
+    # ============================================
     
     if not relevant_info:
         answer = "Извините, я не нашла информации по вашему вопросу. Напишите в поддержку!"
@@ -129,20 +137,25 @@ def handle_message(message):
 Дай ответ на русском языке, используя ТОЛЬКО информацию из контекста. Будь дружелюбной и полезной."""
     
     try:
+        # ========== ЛОГ 3: отправка в Gemini ==========
         print(f"📤 Отправка запроса в Gemini...")
+        
         answer = ask_gemini(prompt)
         
         if answer:
             print(f"✅ Gemini ответил")
             bot.reply_to(message, answer)
         else:
-            # Если Gemini не ответил, используем запасной вариант
-            print(f"⚠️ Использую запасной вариант")
+            print(f"⚠️ Gemini не ответил, использую запасной вариант")
             bot.reply_to(message, f"📌 {relevant_info[0]}")
             
     except Exception as e:
-        print(f"❌ Ошибка: {e}")
+        # ========== ЛОГ 4: ошибка ==========
+        print(f"❌ ОШИБКА: {e}")
+        # ==================================
         bot.reply_to(message, f"📌 Вот что я нашла:\n\n{relevant_info[0]}")
+
+
 
 # === Запуск бота ===
 if __name__ == "__main__":
