@@ -1,3 +1,3 @@
 #!/bin/bash
-echo "🚀 Запуск бота..."
+echo "🚀 Запуск бота на Render..."
 python bot.py

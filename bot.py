@@ -3,18 +3,30 @@ import telebot
 import json
 import time
 from openai import OpenAI
+from flask import Flask
+from threading import Thread
 
-# ========== НАСТРОЙКИ - ВСТАВЬТЕ СВОИ ДАННЫЕ ==========
+# ========== НАСТРОЙКИ ==========
 TELEGRAM_TOKEN = "8704823023:AAGQgsQ6isAm7Da4EasFhQ3p8c2nW4sM02w"
 DEEPSEEK_API_KEY = "sk-98d14b90cff74218b4658a5c095b28ef"
-# ====================================================
+# ================================
 
-# Увеличиваем таймауты для стабильности
-import telebot.apihelper
-telebot.apihelper.CONNECT_TIMEOUT = 30
-telebot.apihelper.READ_TIMEOUT = 60
+# === Веб-сервер для keep-alive (чтобы бот не засыпал) ===
+app = Flask(__name__)
 
-# Загрузка базы знаний
+@app.route('/')
+def index():
+    return "🤖 Бот Екатерины Храмовой работает!"
+
+def run_web():
+    app.run(host='0.0.0.0', port=8080)
+
+def keep_alive():
+    t = Thread(target=run_web)
+    t.daemon = True
+    t.start()
+
+# === Загрузка базы знаний ===
 def load_knowledge_base():
     try:
         with open('katerina_content.json', 'r', encoding='utf-8') as f:
@@ -25,7 +37,7 @@ def load_knowledge_base():
         print(f"❌ Ошибка загрузки базы знаний: {e}")
         return []
 
-# Поиск по базе знаний
+# === Поиск по базе знаний ===
 def search_knowledge(query, knowledge_base):
     query_lower = query.lower()
     results = []
@@ -49,7 +61,7 @@ def search_knowledge(query, knowledge_base):
     results.sort(reverse=True)
     return [text for score, text in results[:3]]
 
-# Инициализация
+# === Инициализация бота ===
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url='https://api.deepseek.com')
 knowledge_base = load_knowledge_base()
@@ -70,14 +82,20 @@ def handle_message(message):
     user_question = message.text
     
     # Показываем, что бот печатает
-    bot.send_chat_action(message.chat.id, 'typing')
+    try:
+        bot.send_chat_action(message.chat.id, 'typing')
+    except:
+        pass
     
     # Ищем в базе знаний
     relevant_info = search_knowledge(user_question, knowledge_base)
     
     if not relevant_info:
         answer = "Извините, я не нашла информации по вашему вопросу в материалах курса. Вы можете написать на почту или задать вопрос в поддержку. Будем рады помочь!"
-        bot.reply_to(message, answer)
+        try:
+            bot.reply_to(message, answer)
+        except:
+            pass
         return
     
     # Формируем контекст
@@ -99,13 +117,22 @@ def handle_message(message):
         
     except Exception as e:
         print(f"Ошибка DeepSeek: {e}")
-        bot.reply_to(message, f"Вот что я нашла в материалах курса:\n\n{relevant_info[0]}")
+        try:
+            bot.reply_to(message, f"Вот что я нашла в материалах курса:\n\n{relevant_info[0]}")
+        except:
+            pass
 
-# Запуск с автоматическим переподключением
-print("🤖 Бот Екатерины Храмовой запущен!")
-while True:
-    try:
-        bot.infinity_polling(timeout=60, long_polling_timeout=60)
-    except Exception as e:
-        print(f"Ошибка: {e}. Перезапуск через 10 секунд...")
-        time.sleep(10)
+# === Запуск бота ===
+if __name__ == "__main__":
+    # Запускаем веб-сервер для keep-alive
+    keep_alive()
+    print("🤖 Бот Екатерины Храмовой запущен!")
+    print("🌐 Веб-сервер для пингов работает на порту 8080")
+    
+    # Запускаем бота с автоматическим переподключением
+    while True:
+        try:
+            bot.infinity_polling(timeout=60, long_polling_timeout=60)
+        except Exception as e:
+            print(f"Ошибка: {e}. Перезапуск через 10 секунд...")
+            time.sleep(10)
