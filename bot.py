@@ -104,26 +104,27 @@ def handle_message(message):
     # Формируем контекст
     context = "\n\n---\n\n".join(relevant_info)
     
-    try:
-        response = openai.ChatCompletion.create(
-            model="deepseek-chat",
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT + "\n\nКонтекст с сайта:\n" + context},
-                {"role": "user", "content": user_question}
-            ],
-            temperature=0.7,
-            max_tokens=600
-        )
-        
-        answer = response.choices[0].message.content
-        bot.reply_to(message, answer)
-        
-    except Exception as e:
-        print(f"Ошибка DeepSeek: {e}")
-        try:
-            bot.reply_to(message, f"Вот что я нашла в материалах курса:\n\n{relevant_info[0]}")
-        except:
-            pass
+   try:
+    print(f"📤 Отправка запроса в DeepSeek...")  # ← добавили
+    
+    response = openai.ChatCompletion.create(
+        model="deepseek-chat",
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT + "\n\nКонтекст с сайта:\n" + context},
+            {"role": "user", "content": user_question}
+        ],
+        temperature=0.7,
+        max_tokens=600
+    )
+    
+    print(f"✅ DeepSeek ответил успешно")  # ← добавили
+    answer = response.choices[0].message.content
+    bot.reply_to(message, answer)
+    
+except Exception as e:
+    print(f"❌ ОШИБКА DeepSeek: {e}")  # ← добавили подробности
+    print(f"❌ Тип ошибки: {type(e).__name__}")  # ← добавили
+    bot.reply_to(message, f"Вот что я нашла в материалах курса:\n\n{relevant_info[0]}")
 
 # === Запуск бота ===
 if __name__ == "__main__":
