@@ -2,18 +2,34 @@
 import telebot
 import json
 import time
-import google.generativeai as genai
+import os
 from flask import Flask
 from threading import Thread
 
+# Импортируем Gemini с обработкой ошибок
+try:
+    import google.generativeai as genai
+    GEMINI_AVAILABLE = True
+except Exception as e:
+    print(f"⚠️ Gemini не загружен: {e}")
+    GEMINI_AVAILABLE = False
+
 # ========== НАСТРОЙКИ ==========
-TELEGRAM_TOKEN = "8704823023:AAGQgsQ6isAm7Da4EasFhQ3p8c2nW4sM02w"
-GEMINI_API_KEY = "AIzaSyBDTN-5avqFIOng-sW9PF0Srv2f9L7wtIU"
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "8704823023:AAGQgsQ6isAm7Da4EasFhQ3p8c2nW4sM02w")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyBDTN-5avqFIOng-sW9PF0Srv2f9L7wtIU")
 # ================================
 
 # Настройка Gemini
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash')
+if GEMINI_AVAILABLE and GEMINI_API_KEY and GEMINI_API_KEY != "ВАШ_КЛЮЧ":
+    try:
+        genai.configure(api_key=GEMINI_API_KEY)
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        print("✅ Gemini настроен")
+    except Exception as e:
+        print(f"❌ Ошибка настройки Gemini: {e}")
+        GEMINI_AVAILABLE = False
+else:
+    print("⚠️ Gemini не настроен (нет ключа или библиотеки)")
 
 # === Веб-сервер для keep-alive ===
 app = Flask(__name__)
@@ -38,7 +54,7 @@ def load_knowledge_base():
             print(f"✅ Загружено блоков: {len(data['content'])}")
             return data['content']
     except Exception as e:
-        print(f"❌ Ошибка загрузки базы знаний: {e}")
+        print(f"❌ Ошибка загрузки: {e}")
         return []
 
 # === Поиск по базе знаний ===
@@ -98,19 +114,32 @@ def handle_message(message):
     
     context = "\n\n---\n\n".join(relevant_info)
     
-    try:
-        print(f"📤 Отправка запроса в Gemini...")
-        
-        prompt = SYSTEM_PROMPT + f"\n\nКонтекст с сайта:\n{context}\n\nВопрос пользователя: {user_question}"
-        response = model.generate_content(prompt)
-        
-        print(f"✅ Gemini ответил")
-        answer = response.text
-        bot.reply_to(message, answer)
-        
-    except Exception as e:
-        print(f"❌ ОШИБКА Gemini: {e}")
-        bot.reply_to(message, f"Вот что я нашла в материалах курса:\n\n{relevant_info[0]}")
+    # Если Gemini доступен — используем его
+    if GEMINI_AVAILABLE:
+        try:
+            print(f"📤 Отправка запроса в Gemini...")
+            
+            prompt = f"""{SYSTEM_PROMPT}
+
+Контекст с сайта:
+{context}
+
+Вопрос пользователя: {user_question}
+
+Дай ответ на русском языке, используя только информацию из контекста. Будь дружелюбной и полезной."""
+            
+            response = model.generate_content(prompt)
+            answer = response.text
+            print(f"✅ Gemini ответил")
+            bot.reply_to(message, answer)
+            return
+            
+        except Exception as e:
+            print(f"❌ ОШИБКА Gemini: {e}")
+            # Если Gemini ошибся, используем запасной вариант
+    
+    # Запасной вариант: отвечаем найденной информацией
+    bot.reply_to(message, f"📌 Вот что я нашла на сайте:\n\n{relevant_info[0]}")
 
 # === Запуск бота ===
 if __name__ == "__main__":
