@@ -7,7 +7,7 @@ from flask import Flask
 from threading import Thread
 
 # ========== НАСТРОЙКИ ==========
-TELEGRAM_TOKEN = "8704823023:AAGQgsQ6isAm7Da4EasFhQ3p8c2nW4sM02w"
+TELEGRAM_TOKEN = "8704823023:AAHu_r5YRuOCqxp5JB2ARXpetdKOfmBy6v0"
 GEMINI_API_KEY = "AIzaSyBDTN-5avqFIOng-sW9PF0Srv2f9L7wtIU"
 # ================================
 
