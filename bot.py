@@ -1,4 +1,4 @@
-# bot.py - исправленная версия
+# bot.py - финальная исправленная версия
 import os
 import sys
 import logging
@@ -129,7 +129,7 @@ def handle_message(message):
     except:
         pass
     
-    # Ищем в базе знаний
+    # СНАЧАЛА ищем в базе знаний
     relevant_info = search_knowledge(user_question, knowledge_base)
     
     if not relevant_info:
@@ -141,7 +141,7 @@ def handle_message(message):
     logging.info(f"🔍 Найдено блоков: {len(relevant_info)}")
     context = "\n\n---\n\n".join(relevant_info)
     
-    # Формируем запрос к Gemini
+    # Формируем запрос к Gemini с найденным контекстом
     prompt = f"""{SYSTEM_PROMPT}
 
 Контекст с сайта:
@@ -151,7 +151,7 @@ def handle_message(message):
 
 Дай ответ на русском языке, используя ТОЛЬКО информацию из контекста. Будь дружелюбной и полезной."""
     
-    # Пробуем получить ответ от Gemini
+    # ПОТОМ отправляем в Gemini
     try:
         logging.info(f"📤 Отправка запроса в Gemini...")
         answer = ask_gemini(prompt)
