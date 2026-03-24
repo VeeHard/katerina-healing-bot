@@ -1,4 +1,4 @@
-# bot.py - RAG-бот с полноценным смысловым поиском
+# bot.py - финальная версия
 import os
 import sys
 import logging
@@ -9,7 +9,6 @@ import requests
 from flask import Flask
 from threading import Thread
 from collections import defaultdict
-import numpy as np
 
 # Настройка логирования
 logging.basicConfig(stream=sys.stderr, level=logging.INFO)
@@ -18,34 +17,6 @@ logging.basicConfig(stream=sys.stderr, level=logging.INFO)
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 # ================================
-
-# === Эмбеддинги для смыслового поиска ===
-def get_embedding(text):
-    """Получает эмбеддинг текста через Gemini API"""
-    if not GEMINI_API_KEY:
-        return None
-    
-    url = f"https://generativelanguage.googleapis.com/v1/models/embedding-001:embedContent?key={GEMINI_API_KEY}"
-    payload = {
-        "model": "models/embedding-001",
-        "content": {"parts": [{"text": text[:2000]}]}
-    }
-    
-    try:
-        response = requests.post(url, json=payload, timeout=10)
-        if response.status_code == 200:
-            return response.json()['embedding']['values']
-        return None
-    except:
-        return None
-
-def cosine_similarity(a, b):
-    """Вычисляет косинусное сходство между двумя векторами"""
-    if not a or not b:
-        return 0
-    a = np.array(a)
-    b = np.array(b)
-    return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
 
 # === Память диалогов ===
 user_histories = defaultdict(list)
@@ -104,7 +75,7 @@ def load_all_knowledge():
     return all_content
 
 # === Смысловой поиск ===
-def semantic_search(query, knowledge_base, top_k=5):
+def semantic_search(query, knowledge_base, top_k=6):
     """Ищет наиболее релевантные блоки по смыслу"""
     query_lower = query.lower()
     results = []
@@ -112,7 +83,7 @@ def semantic_search(query, knowledge_base, top_k=5):
     for block in knowledge_base:
         text = block['text'].lower()
         
-        # Базовый подсчет очков (быстрый, без эмбеддингов)
+        # Базовый подсчет очков
         score = 0
         
         # Прямые совпадения ключевых слов
@@ -201,15 +172,10 @@ def handle_message(message):
     # Сохраняем вопрос в историю
     add_to_history(user_id, "user", user_question)
     
-    # Приветствие для новых пользователей
+    # Проверка на приветствие
     greetings = ["привет", "здравствуй", "добрый день", "здравствуйте", "hello", "hi", "/start"]
-    is_greeting = any(greet in user_question.lower() for greet in greetings)
-    
-    # Ищем релевантную информацию (смысловой поиск)
-    relevant_info = semantic_search(user_question, knowledge_base, top_k=6)
-    
-    if is_greeting:
-        welcome_text = f"""Привет, {user_name}! 👋 
+    if any(greet in user_question.lower() for greet in greetings):
+        welcome_text = f"""Привет, {user_name}! 👋
 
 Я помощник Екатерины Храмовой. Рада познакомиться!
 
@@ -220,10 +186,14 @@ def handle_message(message):
         add_to_history(user_id, "assistant", welcome_text)
         return
     
-    if not relevant_info:
-    logging.info(f"🔍 Ничего не найдено в базе знаний, обращаюсь к Gemini")
+    # Ищем релевантную информацию
+    relevant_info = semantic_search(user_question, knowledge_base, top_k=6)
     
-    prompt = f"""Ты — дружелюбный помощник Екатерины Храмовой, эксперт по курсу очищения организма.
+    # Если ничего не найдено — отправляем в Gemini для генерации ответа
+    if not relevant_info:
+        logging.info(f"🔍 Ничего не найдено в базе знаний, обращаюсь к Gemini")
+        
+        prompt = f"""Ты — дружелюбный помощник Екатерины Храмовой, эксперт по курсу очищения организма.
 
 Пользователь {user_name} задал вопрос: "{user_question}"
 
@@ -241,37 +211,30 @@ def handle_message(message):
 5. Будь теплой, дружелюбной, без шаблонных фраз
 6. Ответь на русском языке
 
-Примеры мягких переходов:
-- "Я в основном помогаю с вопросами о курсе очищения, но..."
-- "Хотя это немного выходит за рамки моей основной темы..."
-- "Если говорить в контексте здоровья и очищения организма..."
-
 Сделай ответ естественным, уникальным для этого вопроса."""
 
-    try:
-        answer = ask_gemini(prompt)
-        if answer:
-            bot.reply_to(message, answer)
-            add_to_history(user_id, "assistant", answer)
-        else:
-            fallback = f"{user_name}, я в основном помогаю с вопросами о курсе очищения организма. Я могу рассказать о программе, тарифах, результатах или об авторе. Что вас интересует? 🤗"
+        try:
+            answer = ask_gemini(prompt)
+            if answer:
+                bot.reply_to(message, answer)
+                add_to_history(user_id, "assistant", answer)
+            else:
+                fallback = f"{user_name}, я в основном помогаю с вопросами о курсе очищения организма. Я могу рассказать о программе, тарифах, результатах или об авторе. Что вас интересует? 🤗"
+                bot.reply_to(message, fallback)
+                add_to_history(user_id, "assistant", fallback)
+        except Exception as e:
+            logging.error(f"❌ Ошибка: {e}")
+            fallback = f"{user_name}, моя задача — помогать с вопросами о курсе очищения организма. Что бы вы хотели узнать: о программе, тарифах или результатах? 😊"
             bot.reply_to(message, fallback)
             add_to_history(user_id, "assistant", fallback)
-    except Exception as e:
-        logging.error(f"❌ Ошибка: {e}")
-        fallback = f"{user_name}, моя задача — помогать с вопросами о курсе очищения организма. Что бы вы хотели узнать: о программе, тарифах или результатах? 😊"
-        bot.reply_to(message, fallback)
-        add_to_history(user_id, "assistant", fallback)
+        
+        return
     
-    return
-    
+    # Если информация найдена — используем её для ответа
     logging.info(f"🔍 Найдено блоков: {len(relevant_info)}")
-    
-    # Формируем контекст
     context = "\n\n---\n\n".join(relevant_info)
     history_context = get_history_context(user_id, last_n=5)
     
-    # Формируем запрос к Gemini
     prompt = f"""{SYSTEM_PROMPT}
 
 {history_context}
@@ -307,6 +270,7 @@ def handle_message(message):
 # === Запрос к Gemini ===
 def ask_gemini(prompt):
     if not GEMINI_API_KEY:
+        logging.error("❌ Нет API ключа Gemini")
         return None
         
     url = f"https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
