@@ -1,4 +1,4 @@
-# bot.py - финальная версия с очередью сообщений
+# bot.py - финальная версия с глобальным таймером 60 секунд
 import os
 import sys
 import logging
@@ -18,6 +18,11 @@ logging.basicConfig(stream=sys.stderr, level=logging.INFO)
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 # ================================
+
+# === Глобальный таймер для Gemini ===
+last_gemini_request_time = 0
+gemini_lock = Lock()
+GEMINI_MIN_INTERVAL = 60  # минимальный интервал между запросами в секундах
 
 # === Очередь сообщений ===
 message_queue = defaultdict(list)
@@ -97,9 +102,24 @@ def keep_alive():
 
 # === Запрос к Gemini ===
 def ask_gemini(prompt):
+    global last_gemini_request_time
+    
     if not GEMINI_API_KEY:
         logging.error("❌ Нет API ключа Gemini")
         return None
+
+    # Проверяем, когда был последний запрос
+    with gemini_lock:
+        current_time = time.time()
+        time_since_last = current_time - last_gemini_request_time
+        
+        if time_since_last < GEMINI_MIN_INTERVAL:
+            wait_time = GEMINI_MIN_INTERVAL - time_since_last
+            logging.info(f"⏳ Ожидание {wait_time:.1f} секунд перед следующим запросом к Gemini...")
+            time.sleep(wait_time)
+            current_time = time.time()
+        
+        last_gemini_request_time = current_time
 
     url = f"https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
 
@@ -109,30 +129,47 @@ def ask_gemini(prompt):
         }]
     }
 
-    max_retries = 3
-    retry_delay = 10
+    max_retries = 5
+    base_delay = 10
 
     for attempt in range(max_retries):
         try:
-            response = requests.post(url, json=payload, timeout=30)
+            response = requests.post(url, json=payload, timeout=60)
 
             if response.status_code == 200:
                 result = response.json()
                 return result['candidates'][0]['content']['parts'][0]['text']
+            
             elif response.status_code == 429:
-                logging.warning(f"⚠️ Лимит запросов Gemini (429), попытка {attempt + 1} из {max_retries}")
+                wait_time = base_delay * (attempt + 3)
+                logging.warning(f"⚠️ Лимит запросов (429), попытка {attempt + 1}/{max_retries}, жду {wait_time} сек")
                 if attempt < max_retries - 1:
-                    wait_time = retry_delay * (attempt + 2)
-                    logging.info(f"⏳ Ожидание {wait_time} секунд...")
                     time.sleep(wait_time)
                 continue
+                
+            elif response.status_code == 503:
+                wait_time = base_delay * (attempt + 2)
+                logging.warning(f"⚠️ Сервер Gemini недоступен (503), попытка {attempt + 1}/{max_retries}, жду {wait_time} сек")
+                if attempt < max_retries - 1:
+                    time.sleep(wait_time)
+                continue
+                
             else:
                 logging.error(f"❌ Gemini ошибка {response.status_code}")
                 return None
+                
+        except requests.exceptions.Timeout:
+            wait_time = base_delay * (attempt + 1)
+            logging.warning(f"⚠️ Таймаут Gemini, попытка {attempt + 1}/{max_retries}, жду {wait_time} сек")
+            if attempt < max_retries - 1:
+                time.sleep(wait_time)
+                continue
+            return None
+            
         except Exception as e:
             logging.error(f"❌ Gemini исключение: {e}")
             if attempt < max_retries - 1:
-                time.sleep(retry_delay)
+                time.sleep(base_delay)
                 continue
             return None
 
@@ -221,9 +258,6 @@ def process_message_sync(message):
             logging.info(f"✅ Отправляю ответ от Gemini")
             bot.reply_to(message, answer)
             add_to_history(user_id, "assistant", answer)
-
-            logging.info(f"⏳ Пауза 5 секунд перед следующим запросом...")
-            time.sleep(5)
 
         else:
             logging.warning(f"⚠️ Gemini не ответил, использую запасной вариант")
