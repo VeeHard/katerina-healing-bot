@@ -9,13 +9,10 @@ import requests
 from collections import defaultdict
 from threading import Lock
 
-# Настройка логирования
 logging.basicConfig(stream=sys.stderr, level=logging.INFO)
 
-# ========== НАСТРОЙКИ ==========
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-# ================================
 
 # === Глобальный таймер для Gemini ===
 last_gemini_request_time = 0
@@ -62,13 +59,13 @@ def load_all_knowledge():
         logging.error(f"❌ Ошибка загрузки основного сайта: {e}")
 
     taplink_content = [
-        {"text": "Екатерина Храмова — специалист по holistic-подходу к здоровью, наставник по очищению организма.", "source": "Taplink", "type": "about_author"},
+        {"text": "Екатерина Храмова — специалист по holistic-подходу к здоровью.", "source": "Taplink", "type": "about_author"},
         {"text": "Курс построен на мягком очищении без голодания и БАДов.", "source": "Taplink", "type": "about_course"},
         {"text": "Формат: живые онлайн-уроки, закрытый Telegram-чат.", "source": "Taplink", "type": "format"},
-        {"text": "Персональное ведение (25 000₽) включает: лекции, практики, консультации, сопровождение.", "source": "Taplink", "type": "tariff_personal"},
+        {"text": "Персональное ведение (25 000₽) включает: лекции, практики, консультации.", "source": "Taplink", "type": "tariff_personal"},
         {"text": "Базовый курс (12 200₽) включает: лекции и практики.", "source": "Taplink", "type": "tariff_base"},
         {"text": "VIP (100 000₽) включает: полное сопровождение и приоритетную поддержку.", "source": "Taplink", "type": "tariff_vip"},
-        {"text": "Отзывы: участники отмечают снижение веса, улучшение самочувствия, повышение энергии.", "source": "Taplink", "type": "reviews"},
+        {"text": "Отзывы: участники отмечают снижение веса, улучшение самочувствия.", "source": "Taplink", "type": "reviews"},
         {"text": "Результаты: улучшение самочувствия, снижение веса, повышение энергии.", "source": "Taplink", "type": "results"},
     ]
 
@@ -196,7 +193,7 @@ def handle_message(message):
 
 # === Запуск ===
 if __name__ == "__main__":
-    logging.info("🤖 Бот запущен (без Flask)")
+    logging.info("🤖 Бот запущен")
     while True:
         try:
             bot.infinity_polling(timeout=60, long_polling_timeout=60)
