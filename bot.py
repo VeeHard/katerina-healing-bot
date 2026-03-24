@@ -171,9 +171,120 @@ def handle_message(message):
             logging.info(f"✅ Отправляю ответ от Gemini")
             bot.reply_to(message, answer)
             add_to_history(user_id, "assistant", answer)
+
+            # Пауза после успешного ответа для обхода лимитов Gemini
+            logging.info(f"⏳ Пауза 5 секунд перед следующим запросом...")
+            time.sleep(5)
+
         else:
-            logging.warning(f"⚠️ Gemini не ответил")
-            fallback = f"{user_name}, у меня временные сложности. Попробуйте спросить позже или напишите в поддержку. 😊"
+            logging.warning(f"⚠️ Gemini не ответил, использую запасной вариант")
+            fallback_info = []
+            for block in knowledge_base:
+                if any(word in user_question.lower() for word in ["цена", "стоимость", "тариф", "курс", "сколько"]):
+                    if block['type'] in ['tariff_personal', 'tariff_base', 'tariff_vip']:
+                        fallback_info.append(block['text'])
+                elif "автор" in user_question.lower() and block['type'] == 'about_author':
+                    fallback_info.append(block['text'])
+                elif "результат" in user_question.lower() and block['type'] == 'results':
+                    fallback_info.append(block['text'])
+                elif "отзыв" in user_question.lower() and block['type'] == 'reviews':
+                    fallback_info.append(block['text'])
+                elif "как проходит" in user_question.lower() and block['type'] == 'how_it_works':
+                    fallback_info.append(block['text'])
+
+            if fallback_info:
+                fallback = f"{user_name}, вот что я знаю по вашему вопросу:\n\n" + "\n\n".join(fallback_info[:3])
+            else:
+                fallback = f"{user_name}, у меня временные сложности с обработкой запроса. Попробуйте спросить позже или напишите в поддержку. 😊"
+
+            bot.reply_to(message, fallback)
+            add_to_history(user_id, "assistant", fallback)
+
+    except Exception as e:
+        logging.error(f"❌ ОШИБКА: {e}")
+        fallback = f"{user_name}, произошла ошибка. Попробуйте спросить по-другому или напишите позже. 😊"
+        bot.reply_to(message, fallback)
+        add_to_history(user_id, "assistant", fallback)
+
+    user_id = message.from_user.id
+    user_name = message.from_user.first_name or "гость"
+    user_question = message.text
+
+    logging.info(f"📩 ПОЛУЧЕНО СООБЩЕНИЕ от {user_id} ({user_name}): {user_question}")
+
+    try:
+        bot.send_chat_action(message.chat.id, 'typing')
+    except:
+        pass
+
+    add_to_history(user_id, "user", user_question)
+
+    greetings = ["привет", "здравствуй", "добрый день", "здравствуйте", "hello", "hi", "/start"]
+    is_first_greeting = len(user_histories.get(user_id, [])) <= 1 and any(greet in user_question.lower() for greet in greetings)
+
+    if is_first_greeting:
+        welcome_text = f"""Привет, {user_name}! 👋
+
+Я помощник Екатерины Храмовой. Рада познакомиться!
+
+Я здесь, чтобы рассказать вам о курсе по очищению организма, помочь разобраться в тарифах, поделиться результатами и ответить на любые вопросы.
+
+Чем могу быть полезна? Рассказать о программе, ценах или подобрать подходящий тариф? 🤗"""
+        bot.reply_to(message, welcome_text)
+        add_to_history(user_id, "assistant", welcome_text)
+        return
+
+    history_context = get_history_context(user_id, last_n=5)
+
+    all_info = []
+    for block in knowledge_base:
+        all_info.append(block['text'])
+    full_knowledge = "\n\n---\n\n".join(all_info)
+
+    prompt = f"""{SYSTEM_PROMPT}
+
+{history_context}
+
+Вот ВСЯ информация с сайта и Taplink:
+{full_knowledge}
+
+Вопрос пользователя: {user_question}
+Имя пользователя: {user_name}
+
+Найди в этой информации ответ на вопрос.
+- Если в информации есть точный ответ — дай его развернуто, с душой
+- Если информации недостаточно — скажи об этом и предложи помощь
+- Используй ВСЮ информацию, которая есть
+- Ответь на русском языке, будь теплой и заботливой"""
+
+    try:
+        logging.info(f"📤 Отправка запроса в Gemini...")
+        answer = ask_gemini(prompt)
+
+        if answer:
+            logging.info(f"✅ Отправляю ответ от Gemini")
+            bot.reply_to(message, answer)
+            add_to_history(user_id, "assistant", answer)
+            
+            # ⭐ Критически важно: пауза после успешного ответа
+            logging.info(f"⏳ Пауза 5 секунд перед следующим запросом...")
+            time.sleep(5)
+            
+        else:
+            logging.warning(f"⚠️ Gemini не ответил, использую запасной вариант")
+            fallback_info = []
+            for block in knowledge_base:
+                if any(word in user_question.lower() for word in ["цена", "стоимость", "тариф", "курс", "сколько"]):
+                    if block['type'] in ['tariff_personal', 'tariff_base', 'tariff_vip']:
+                        fallback_info.append(block['text'])
+                elif "автор" in user_question.lower() and block['type'] == 'about_author':
+                    fallback_info.append(block['text'])
+            
+            if fallback_info:
+                fallback = f"{user_name}, вот что я знаю по вашему вопросу:\n\n" + "\n\n".join(fallback_info[:3])
+            else:
+                fallback = f"{user_name}, у меня временные сложности с обработкой запроса. Попробуйте спросить позже или напишите в поддержку. 😊"
+            
             bot.reply_to(message, fallback)
             add_to_history(user_id, "assistant", fallback)
 
@@ -197,18 +308,33 @@ def ask_gemini(prompt):
         }]
     }
 
-    try:
-        response = requests.post(url, json=payload, timeout=30)
+    max_retries = 3
+    retry_delay = 10  # увеличил с 5 до 10 секунд
 
-        if response.status_code == 200:
-            result = response.json()
-            return result['candidates'][0]['content']['parts'][0]['text']
-        else:
-            logging.error(f"❌ Gemini ошибка {response.status_code}")
+    for attempt in range(max_retries):
+        try:
+            response = requests.post(url, json=payload, timeout=30)
+
+            if response.status_code == 200:
+                return response.json()['candidates'][0]['content']['parts'][0]['text']
+            elif response.status_code == 429:
+                logging.warning(f"⚠️ Лимит запросов Gemini (429), попытка {attempt + 1} из {max_retries}")
+                if attempt < max_retries - 1:
+                    wait_time = retry_delay * (attempt + 2)  # 10, 20, 30 секунд
+                    logging.info(f"⏳ Ожидание {wait_time} секунд...")
+                    time.sleep(wait_time)
+                continue
+            else:
+                logging.error(f"❌ Gemini ошибка {response.status_code}")
+                return None
+        except Exception as e:
+            logging.error(f"❌ Gemini исключение: {e}")
+            if attempt < max_retries - 1:
+                time.sleep(retry_delay)
+                continue
             return None
-    except Exception as e:
-        logging.error(f"❌ Gemini исключение: {e}")
-        return None
+
+    return None
 
 # === Запуск ===
 if __name__ == "__main__":
