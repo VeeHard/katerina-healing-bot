@@ -1,4 +1,4 @@
-# bot.py - финальная версия
+# bot.py - финальная исправленная версия
 import os
 import sys
 import logging
@@ -154,6 +154,7 @@ SYSTEM_PROMPT = """
 8. Используй теплые слова, эмодзи, будь поддерживающей
 9. Если вопрос не совсем понятен — уточни, а не говори "не нашла информации"
 10. Отвечай ТОЛЬКО на русском языке
+11. Учитывай историю диалога. Если вы уже общались — не здоровайся заново, продолжай разговор
 """
 
 @bot.message_handler(func=lambda message: True)
@@ -172,9 +173,11 @@ def handle_message(message):
     # Сохраняем вопрос в историю
     add_to_history(user_id, "user", user_question)
     
-    # Проверка на приветствие
+    # Проверка на приветствие (только для первого сообщения)
     greetings = ["привет", "здравствуй", "добрый день", "здравствуйте", "hello", "hi", "/start"]
-    if any(greet in user_question.lower() for greet in greetings):
+    is_first_greeting = len(user_histories.get(user_id, [])) <= 1 and any(greet in user_question.lower() for greet in greetings)
+    
+    if is_first_greeting:
         welcome_text = f"""Привет, {user_name}! 👋
 
 Я помощник Екатерины Храмовой. Рада познакомиться!
@@ -189,14 +192,14 @@ def handle_message(message):
     # Ищем релевантную информацию
     relevant_info = semantic_search(user_question, knowledge_base, top_k=6)
     
-    # Если ничего не найдено — отправляем в Gemini для генерации ответа
-    if not relevant_info:
-    logging.info(f"🔍 Ничего не найдено в базе знаний, обращаюсь к Gemini")
-    
-    # Получаем историю диалога
+    # Получаем историю диалога для всех случаев
     history_context = get_history_context(user_id, last_n=5)
     
-    prompt = f"""Ты — дружелюбный помощник Екатерины Храмовой, эксперт по курсу очищения организма.
+    # Если ничего не найдено — отправляем в Gemini для генерации ответа
+    if not relevant_info:
+        logging.info(f"🔍 Ничего не найдено в базе знаний, обращаюсь к Gemini")
+        
+        prompt = f"""Ты — дружелюбный помощник Екатерины Храмовой, эксперт по курсу очищения организма.
 
 {history_context}
 
@@ -215,27 +218,26 @@ def handle_message(message):
 
 Сделай ответ естественным, уникальным для этого вопроса."""
 
-    try:
-        answer = ask_gemini(prompt)
-        if answer:
-            bot.reply_to(message, answer)
-            add_to_history(user_id, "assistant", answer)
-        else:
-            fallback = f"{user_name}, я в основном помогаю с вопросами о курсе очищения организма. Я могу рассказать о программе, тарифах, результатах или об авторе. Что вас интересует? 🤗"
+        try:
+            answer = ask_gemini(prompt)
+            if answer:
+                bot.reply_to(message, answer)
+                add_to_history(user_id, "assistant", answer)
+            else:
+                fallback = f"Я помогаю с вопросами о курсе очищения организма. Что бы вы хотели узнать: о программе, тарифах или результатах? 😊"
+                bot.reply_to(message, fallback)
+                add_to_history(user_id, "assistant", fallback)
+        except Exception as e:
+            logging.error(f"❌ Ошибка: {e}")
+            fallback = f"Я помогаю с вопросами о курсе очищения организма. Что бы вы хотели узнать: о программе, тарифах или результатах? 😊"
             bot.reply_to(message, fallback)
             add_to_history(user_id, "assistant", fallback)
-    except Exception as e:
-        logging.error(f"❌ Ошибка: {e}")
-        fallback = f"Я помогаю с вопросами о курсе очищения организма. Что бы вы хотели узнать: о программе, тарифах или результатах? 😊"
-        bot.reply_to(message, fallback)
-        add_to_history(user_id, "assistant", fallback)
-    
-    return
+        
+        return
     
     # Если информация найдена — используем её для ответа
     logging.info(f"🔍 Найдено блоков: {len(relevant_info)}")
     context = "\n\n---\n\n".join(relevant_info)
-    history_context = get_history_context(user_id, last_n=5)
     
     prompt = f"""{SYSTEM_PROMPT}
 
@@ -259,13 +261,13 @@ def handle_message(message):
             add_to_history(user_id, "assistant", answer)
         else:
             logging.warning(f"⚠️ Gemini не ответил, использую запасной вариант")
-            fallback = f"{user_name}, вот что я знаю по вашему вопросу:\n\n" + "\n\n".join(relevant_info[:3])
+            fallback = f"Вот что я знаю по вашему вопросу:\n\n" + "\n\n".join(relevant_info[:3])
             bot.reply_to(message, fallback)
             add_to_history(user_id, "assistant", fallback)
             
     except Exception as e:
         logging.error(f"❌ ОШИБКА: {e}")
-        fallback = f"{user_name}, вот что я нашла:\n\n" + "\n\n".join(relevant_info[:2])
+        fallback = f"Вот что я нашла:\n\n" + "\n\n".join(relevant_info[:2])
         bot.reply_to(message, fallback)
         add_to_history(user_id, "assistant", fallback)
 
@@ -301,7 +303,7 @@ if __name__ == "__main__":
     keep_alive()
     logging.info("⏳ Ожидание 5 секунд...")
     time.sleep(5)
-    logging.info("🤖 Бот с RAG-поиском запущен!")
+    logging.info("🤖 Бот запущен!")
     
     while True:
         try:
