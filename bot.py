@@ -7,8 +7,8 @@ from flask import Flask
 from threading import Thread
 
 # ========== НАСТРОЙКИ ==========
-TELEGRAM_TOKEN = "8704823023:AAHu_r5YRuOCqxp5JB2ARXpetdKOfmBy6v0"
-GEMINI_API_KEY = "AIzaSyBDTN-5avqFIOng-sW9PF0Srv2f9L7wtIU"
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 # ================================
 
 # === Веб-сервер для keep-alive ===
