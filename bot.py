@@ -1,4 +1,4 @@
-# bot.py - финальная исправленная версия
+# bot.py - финальная версия
 import os
 import sys
 import logging
@@ -38,10 +38,7 @@ def get_history_context(user_id, last_n=5):
 
 # === Загрузка базы знаний ===
 def load_all_knowledge():
-    """Загружает контент с обоих сайтов"""
     all_content = []
-    
-    # Основной сайт
     try:
         with open('katerina_content.json', 'r', encoding='utf-8') as f:
             data = json.load(f)
@@ -54,8 +51,7 @@ def load_all_knowledge():
             logging.info(f"✅ Загружено с основного сайта: {len(data['content'])} блоков")
     except Exception as e:
         logging.error(f"❌ Ошибка загрузки основного сайта: {e}")
-    
-    # Taplink (добавляем вручную важную информацию)
+
     taplink_content = [
         {"text": "Екатерина Храмова — специалист по holistic-подходу к здоровью, наставник по очищению организма. Ее подход объединяет знания о теле, эмоциях и энергетике.", "source": "Taplink", "type": "about_author"},
         {"text": "Курс построен на мягком очищении без голодания и БАДов. Екатерина передает знания и практики, которые остаются с вами навсегда.", "source": "Taplink", "type": "about_course"},
@@ -67,55 +63,12 @@ def load_all_knowledge():
         {"text": "Результаты программы: улучшение самочувствия, снижение веса, повышение энергии, регенерация организма, улучшение работы ЖКТ, нормализация сна, снижение тревожности.", "source": "Taplink", "type": "results"},
         {"text": "Как проходит курс: рекомендованный протокол подготовки, 4 урока в живом онлайн формате с записью, закрытая группа в Telegram, поддержка единомышленников.", "source": "Taplink", "type": "how_it_works"},
     ]
-    
+
     for block in taplink_content:
         all_content.append(block)
-    
+
     logging.info(f"✅ Всего загружено блоков: {len(all_content)}")
     return all_content
-
-# === Смысловой поиск ===
-def semantic_search(query, knowledge_base, top_k=6):
-    """Ищет наиболее релевантные блоки по смыслу"""
-    query_lower = query.lower()
-    results = []
-    
-    for block in knowledge_base:
-        text = block['text'].lower()
-        
-        # Базовый подсчет очков
-        score = 0
-        
-        # Прямые совпадения ключевых слов
-        important_words = ["персональное", "ведение", "базовый", "vip", "цена", "стоимость", 
-                          "результат", "отзыв", "программа", "очищение", "кишечник", "печень",
-                          "тариф", "входит", "включено", "катерина", "храмова", "автор"]
-        
-        for word in important_words:
-            if word in query_lower and word in text:
-                score += 15
-        
-        # Совпадение по словам
-        words = query_lower.split()
-        for word in words:
-            if len(word) > 3 and word in text:
-                score += 3
-        
-        # Учитываем тип блока
-        if block['type'] == 'tariff_personal' and 'персональное' in query_lower:
-            score += 30
-        if block['type'] == 'tariff_base' and 'базовый' in query_lower:
-            score += 30
-        if block['type'] == 'tariff_vip' and 'vip' in query_lower:
-            score += 30
-        if block['type'] == 'about_author' and ('автор' in query_lower or 'катерина' in query_lower):
-            score += 25
-        
-        if score > 0:
-            results.append((score, block))
-    
-    results.sort(reverse=True, key=lambda x: x[0])
-    return [r[1]['text'] for r in results[:top_k]]
 
 # === Веб-сервер ===
 app = Flask(__name__)
@@ -162,21 +115,19 @@ def handle_message(message):
     user_id = message.from_user.id
     user_name = message.from_user.first_name or "гость"
     user_question = message.text
-    
+
     logging.info(f"📩 ПОЛУЧЕНО СООБЩЕНИЕ от {user_id} ({user_name}): {user_question}")
-    
+
     try:
         bot.send_chat_action(message.chat.id, 'typing')
     except:
         pass
-    
-    # Сохраняем вопрос в историю
+
     add_to_history(user_id, "user", user_question)
-    
-    # Проверка на приветствие (только для первого сообщения)
+
     greetings = ["привет", "здравствуй", "добрый день", "здравствуйте", "hello", "hi", "/start"]
     is_first_greeting = len(user_histories.get(user_id, [])) <= 1 and any(greet in user_question.lower() for greet in greetings)
-    
+
     if is_first_greeting:
         welcome_text = f"""Привет, {user_name}! 👋
 
@@ -188,86 +139,47 @@ def handle_message(message):
         bot.reply_to(message, welcome_text)
         add_to_history(user_id, "assistant", welcome_text)
         return
-    
-    # Ищем релевантную информацию
-    relevant_info = semantic_search(user_question, knowledge_base, top_k=6)
-    
-    # Получаем историю диалога для всех случаев
+
     history_context = get_history_context(user_id, last_n=5)
-    
-    # Если ничего не найдено — отправляем в Gemini для генерации ответа
-    if not relevant_info:
-        logging.info(f"🔍 Ничего не найдено в базе знаний, обращаюсь к Gemini")
-        
-        prompt = f"""Ты — дружелюбный помощник Екатерины Храмовой, эксперт по курсу очищения организма.
 
-{history_context}
+    all_info = []
+    for block in knowledge_base:
+        all_info.append(block['text'])
+    full_knowledge = "\n\n---\n\n".join(all_info)
 
-Пользователь {user_name} задал вопрос: "{user_question}"
-
-В базе знаний нет точной информации по этому вопросу.
-
-Твоя задача:
-1. Учитывай историю диалога. Если вы уже общались — не здоровайся заново, продолжай разговор
-2. Если вопрос не связан с темой курса — мягко скажи, что твоя специализация — это курс очищения организма, и предложи помощь по этой теме
-3. Если вопрос связан с темой (здоровье, очищение, питание, энергия, самочувствие) — ответь на него своими словами, используя знания о holistic-подходе
-4. После ответа предложи 3-4 конкретные темы, по которым ты можешь помочь
-5. Используй имя пользователя {user_name}, но только если это уместно по контексту (не начинай каждый ответ с "Привет, {user_name}!")
-6. Будь теплой, дружелюбной, без шаблонных фраз
-7. Ответь на русском языке
-
-Сделай ответ естественным, уникальным для этого вопроса."""
-
-        try:
-            answer = ask_gemini(prompt)
-            if answer:
-                bot.reply_to(message, answer)
-                add_to_history(user_id, "assistant", answer)
-            else:
-                fallback = f"Я помогаю с вопросами о курсе очищения организма. Что бы вы хотели узнать: о программе, тарифах или результатах? 😊"
-                bot.reply_to(message, fallback)
-                add_to_history(user_id, "assistant", fallback)
-        except Exception as e:
-            logging.error(f"❌ Ошибка: {e}")
-            fallback = f"Я помогаю с вопросами о курсе очищения организма. Что бы вы хотели узнать: о программе, тарифах или результатах? 😊"
-            bot.reply_to(message, fallback)
-            add_to_history(user_id, "assistant", fallback)
-        
-        return
-    
-    # Если информация найдена — используем её для ответа
-    logging.info(f"🔍 Найдено блоков: {len(relevant_info)}")
-    context = "\n\n---\n\n".join(relevant_info)
-    
     prompt = f"""{SYSTEM_PROMPT}
 
 {history_context}
 
-Вся информация с сайта и Taplink:
-{context}
+Вот ВСЯ информация с сайта и Taplink:
+{full_knowledge}
 
 Вопрос пользователя: {user_question}
 Имя пользователя: {user_name}
 
-Дай развернутый, теплый, продающий ответ. Используй ВСЮ информацию, которая есть. Если нужно — предложи варианты, помоги выбрать, расскажи подробнее. Будь как заботливый консультант, который хочет помочь человеку сделать правильный выбор. Ответь на русском языке."""
-    
+Найди в этой информации ответ на вопрос.
+- Если в информации есть точный ответ — дай его развернуто, с душой
+- Если информации недостаточно — скажи об этом и предложи помощь
+- Используй ВСЮ информацию, которая есть
+- Ответь на русском языке, будь теплой и заботливой"""
+
     try:
         logging.info(f"📤 Отправка запроса в Gemini...")
         answer = ask_gemini(prompt)
-        
+
         if answer:
             logging.info(f"✅ Отправляю ответ от Gemini")
             bot.reply_to(message, answer)
             add_to_history(user_id, "assistant", answer)
         else:
-            logging.warning(f"⚠️ Gemini не ответил, использую запасной вариант")
-            fallback = f"Вот что я знаю по вашему вопросу:\n\n" + "\n\n".join(relevant_info[:3])
+            logging.warning(f"⚠️ Gemini не ответил")
+            fallback = f"{user_name}, у меня временные сложности. Попробуйте спросить позже или напишите в поддержку. 😊"
             bot.reply_to(message, fallback)
             add_to_history(user_id, "assistant", fallback)
-            
+
     except Exception as e:
         logging.error(f"❌ ОШИБКА: {e}")
-        fallback = f"Вот что я нашла:\n\n" + "\n\n".join(relevant_info[:2])
+        fallback = f"{user_name}, произошла ошибка. Попробуйте спросить по-другому или напишите позже. 😊"
         bot.reply_to(message, fallback)
         add_to_history(user_id, "assistant", fallback)
 
@@ -276,18 +188,18 @@ def ask_gemini(prompt):
     if not GEMINI_API_KEY:
         logging.error("❌ Нет API ключа Gemini")
         return None
-        
+
     url = f"https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
-    
+
     payload = {
         "contents": [{
             "parts": [{"text": prompt}]
         }]
     }
-    
+
     try:
         response = requests.post(url, json=payload, timeout=30)
-        
+
         if response.status_code == 200:
             result = response.json()
             return result['candidates'][0]['content']['parts'][0]['text']
@@ -304,7 +216,7 @@ if __name__ == "__main__":
     logging.info("⏳ Ожидание 5 секунд...")
     time.sleep(5)
     logging.info("🤖 Бот запущен!")
-    
+
     while True:
         try:
             bot.infinity_polling(timeout=60, long_polling_timeout=60)
