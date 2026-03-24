@@ -1,4 +1,4 @@
-# bot.py - финальная исправленная версия
+# bot.py - финальная версия с улучшенным keep-alive
 import os
 import sys
 import logging
@@ -30,8 +30,12 @@ app = Flask(__name__)
 def index():
     return "🤖 Бот с Gemini работает!"
 
+@app.route('/health')
+def health():
+    return "OK", 200
+
 def run_web():
-    app.run(host='0.0.0.0', port=8080)
+    app.run(host='0.0.0.0', port=8080, threaded=True)
 
 def keep_alive():
     t = Thread(target=run_web)
@@ -79,7 +83,6 @@ def ask_gemini(prompt):
         logging.error("❌ Нет API ключа Gemini")
         return None
         
-    # ПРАВИЛЬНЫЙ URL: стабильная версия v1, актуальная модель 2.5-flash
     url = f"https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
     
     payload = {
@@ -124,13 +127,18 @@ def handle_message(message):
     
     logging.info(f"📩 ПОЛУЧЕНО СООБЩЕНИЕ от {message.from_user.id}: {user_question}")
     
-    # Показываем, что бот печатает
     try:
         bot.send_chat_action(message.chat.id, 'typing')
     except:
         pass
     
-    # СНАЧАЛА ищем в базе знаний
+    # Проверка на приветствия
+    greetings = ["привет", "здравствуй", "добрый день", "здравствуйте", "hello", "hi", "/start"]
+    if any(greet in user_question.lower() for greet in greetings):
+        welcome_text = "Привет! 👋 Я помощник Екатерины Храмовой. Я могу рассказать о курсе по очищению организма, ценах, программе и ответить на ваши вопросы. Чем могу помочь?"
+        bot.reply_to(message, welcome_text)
+        return
+    
     relevant_info = search_knowledge(user_question, knowledge_base)
     
     if not relevant_info:
@@ -142,7 +150,6 @@ def handle_message(message):
     logging.info(f"🔍 Найдено блоков: {len(relevant_info)}")
     context = "\n\n---\n\n".join(relevant_info)
     
-    # Формируем запрос к Gemini с найденным контекстом
     prompt = f"""{SYSTEM_PROMPT}
 
 Контекст с сайта:
@@ -152,7 +159,6 @@ def handle_message(message):
 
 Дай ответ на русском языке, используя ТОЛЬКО информацию из контекста. Будь дружелюбной и полезной."""
     
-    # ПОТОМ отправляем в Gemini
     try:
         logging.info(f"📤 Отправка запроса в Gemini...")
         answer = ask_gemini(prompt)
@@ -172,7 +178,6 @@ def handle_message(message):
 if __name__ == "__main__":
     keep_alive()
     
-    # Небольшая задержка перед запуском polling
     logging.info("⏳ Ожидание 5 секунд перед подключением к Telegram...")
     time.sleep(5)
     
