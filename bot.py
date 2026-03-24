@@ -1,4 +1,3 @@
-# bot.py - финальная версия с глобальным таймером 60 секунд
 import os
 import sys
 import logging
@@ -6,8 +5,6 @@ import telebot
 import json
 import time
 import requests
-from flask import Flask
-from threading import Thread
 from collections import defaultdict
 from threading import Lock
 
