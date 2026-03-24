@@ -1,4 +1,9 @@
 # bot.py - полная версия с Gemini
+import sys
+import logging
+
+# Принудительно отправляем все print в stderr, чтобы Render их видел
+logging.basicConfig(stream=sys.stderr, level=logging.INFO)
 import os
 import telebot
 import json
@@ -102,12 +107,18 @@ SYSTEM_PROMPT = """
 
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
-    # ========== ЛОГ 1: сообщение получено ==========
-    print(f"📩 ПОЛУЧЕНО СООБЩЕНИЕ от {message.from_user.id}: {message.text}")
+    logging.info(f"📩 ПОЛУЧЕНО СООБЩЕНИЕ от {message.from_user.id}: {message.text}")
     # ==============================================
     
     user_question = message.text
     
+    try:
+        logging.info(f"📤 Отправка запроса в Gemini...")
+        # ... вызов Gemini ...
+        logging.info(f"✅ Gemini ответил")
+    except Exception as e:
+        logging.error(f"❌ ОШИБКА Gemini: {e}")
+
     try:
         bot.send_chat_action(message.chat.id, 'typing')
     except:
