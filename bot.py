@@ -79,7 +79,8 @@ def ask_gemini(prompt):
         logging.error("❌ Нет API ключа Gemini")
         return None
         
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+    # ПРАВИЛЬНЫЙ URL: стабильная версия v1, актуальная модель 2.5-flash
+    url = f"https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
     
     payload = {
         "contents": [{
