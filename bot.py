@@ -1,4 +1,5 @@
 # bot.py - полная версия с Gemini
+import os
 import telebot
 import json
 import time
