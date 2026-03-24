@@ -1,10 +1,7 @@
-# bot.py - полная версия с Gemini
+# bot.py - исправленная версия
+import os
 import sys
 import logging
-
-# Принудительно отправляем все print в stderr, чтобы Render их видел
-logging.basicConfig(stream=sys.stderr, level=logging.INFO)
-import os
 import telebot
 import json
 import time
@@ -12,10 +9,19 @@ import requests
 from flask import Flask
 from threading import Thread
 
+# Настройка логирования
+logging.basicConfig(stream=sys.stderr, level=logging.INFO)
+
 # ========== НАСТРОЙКИ ==========
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 # ================================
+
+# === Проверка наличия ключей ===
+if not TELEGRAM_TOKEN:
+    logging.error("❌ TELEGRAM_TOKEN не задан в переменных окружения!")
+if not GEMINI_API_KEY:
+    logging.error("❌ GEMINI_API_KEY не задан в переменных окружения!")
 
 # === Веб-сервер для keep-alive ===
 app = Flask(__name__)
@@ -37,10 +43,10 @@ def load_knowledge_base():
     try:
         with open('katerina_content.json', 'r', encoding='utf-8') as f:
             data = json.load(f)
-            print(f"✅ Загружено блоков: {len(data['content'])}")
+            logging.info(f"✅ Загружено блоков: {len(data['content'])}")
             return data['content']
     except Exception as e:
-        print(f"❌ Ошибка загрузки: {e}")
+        logging.error(f"❌ Ошибка загрузки: {e}")
         return []
 
 # === Поиск по базе знаний ===
@@ -69,6 +75,10 @@ def search_knowledge(query, knowledge_base):
 
 # === Запрос к Gemini ===
 def ask_gemini(prompt):
+    if not GEMINI_API_KEY:
+        logging.error("❌ Нет API ключа Gemini")
+        return None
+        
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
     
     payload = {
@@ -82,12 +92,14 @@ def ask_gemini(prompt):
         
         if response.status_code == 200:
             result = response.json()
-            return result['candidates'][0]['content']['parts'][0]['text']
+            text = result['candidates'][0]['content']['parts'][0]['text']
+            logging.info(f"✅ Gemini ответ получен, длина: {len(text)}")
+            return text
         else:
-            print(f"Gemini ошибка: {response.status_code}")
+            logging.error(f"❌ Gemini ошибка {response.status_code}: {response.text[:200]}")
             return None
     except Exception as e:
-        print(f"Gemini исключение: {e}")
+        logging.error(f"❌ Gemini исключение: {e}")
         return None
 
 # === Инициализация бота ===
@@ -107,18 +119,11 @@ SYSTEM_PROMPT = """
 
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
-    logging.info(f"📩 ПОЛУЧЕНО СООБЩЕНИЕ от {message.from_user.id}: {message.text}")
-    # ==============================================
-    
     user_question = message.text
     
-    try:
-        logging.info(f"📤 Отправка запроса в Gemini...")
-        # ... вызов Gemini ...
-        logging.info(f"✅ Gemini ответил")
-    except Exception as e:
-        logging.error(f"❌ ОШИБКА Gemini: {e}")
-
+    logging.info(f"📩 ПОЛУЧЕНО СООБЩЕНИЕ от {message.from_user.id}: {user_question}")
+    
+    # Показываем, что бот печатает
     try:
         bot.send_chat_action(message.chat.id, 'typing')
     except:
@@ -127,15 +132,13 @@ def handle_message(message):
     # Ищем в базе знаний
     relevant_info = search_knowledge(user_question, knowledge_base)
     
-    # ========== ЛОГ 2: результат поиска ==========
-    print(f"🔍 Найдено блоков: {len(relevant_info) if relevant_info else 0}")
-    # ============================================
-    
     if not relevant_info:
+        logging.info(f"🔍 Ничего не найдено в базе знаний")
         answer = "Извините, я не нашла информации по вашему вопросу. Напишите в поддержку!"
         bot.reply_to(message, answer)
         return
     
+    logging.info(f"🔍 Найдено блоков: {len(relevant_info)}")
     context = "\n\n---\n\n".join(relevant_info)
     
     # Формируем запрос к Gemini
@@ -148,42 +151,36 @@ def handle_message(message):
 
 Дай ответ на русском языке, используя ТОЛЬКО информацию из контекста. Будь дружелюбной и полезной."""
     
+    # Пробуем получить ответ от Gemini
     try:
-        # ========== ЛОГ 3: отправка в Gemini ==========
-        print(f"📤 Отправка запроса в Gemini...")
-        
+        logging.info(f"📤 Отправка запроса в Gemini...")
         answer = ask_gemini(prompt)
         
         if answer:
-            print(f"✅ Gemini ответил")
+            logging.info(f"✅ Отправляю ответ от Gemini")
             bot.reply_to(message, answer)
         else:
-            print(f"⚠️ Gemini не ответил, использую запасной вариант")
+            logging.warning(f"⚠️ Gemini не ответил, использую запасной вариант")
             bot.reply_to(message, f"📌 {relevant_info[0]}")
             
     except Exception as e:
-        # ========== ЛОГ 4: ошибка ==========
-        print(f"❌ ОШИБКА: {e}")
-        # ==================================
+        logging.error(f"❌ ОШИБКА в handle_message: {e}")
         bot.reply_to(message, f"📌 Вот что я нашла:\n\n{relevant_info[0]}")
 
-
-
-# === Запуск бота ===
 # === Запуск бота ===
 if __name__ == "__main__":
     keep_alive()
     
     # Небольшая задержка перед запуском polling
-    print("⏳ Ожидание 5 секунд перед подключением к Telegram...")
+    logging.info("⏳ Ожидание 5 секунд перед подключением к Telegram...")
     time.sleep(5)
     
-    print("🤖 Бот с Gemini запущен!")
-    print("🌐 Веб-сервер для пингов работает на порту 8080")
+    logging.info("🤖 Бот с Gemini запущен!")
+    logging.info("🌐 Веб-сервер для пингов работает на порту 8080")
     
     while True:
         try:
             bot.infinity_polling(timeout=60, long_polling_timeout=60)
         except Exception as e:
-            print(f"Ошибка: {e}. Перезапуск через 10 секунд...")
+            logging.error(f"Ошибка polling: {e}. Перезапуск через 10 секунд...")
             time.sleep(10)
