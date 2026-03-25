@@ -1,23 +1,46 @@
-# bot.py - только бот, без Flask
+# bot_gemini_grounding.py - бот с Google Search Grounding
 import os
 import sys
 import logging
 import telebot
-import json
 import time
-import requests
+import random
+import google.generativeai as genai
+from flask import Flask
+from threading import Thread
 from collections import defaultdict
 from threading import Lock
 
+# Настройка логирования
 logging.basicConfig(stream=sys.stderr, level=logging.INFO)
 
+# ========== НАСТРОЙКИ ==========
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+# ================================
+
+# === Проверка ключей ===
+if not TELEGRAM_TOKEN:
+    logging.error("❌ TELEGRAM_TOKEN не задан!")
+if not GEMINI_API_KEY:
+    logging.error("❌ GEMINI_API_KEY не задан!")
+
+# === Настройка Gemini с Grounding ===
+genai.configure(api_key=GEMINI_API_KEY)
+
+# Создаём инструмент для поиска в интернете
+grounding_tool = genai.Tool(google_search={})
+
+# Настраиваем модель с включённым поиском
+model = genai.GenerativeModel(
+    model_name="gemini-2.0-flash",
+    tools=[grounding_tool]
+)
 
 # === Глобальный таймер для Gemini ===
 last_gemini_request_time = 0
 gemini_lock = Lock()
-GEMINI_MIN_INTERVAL = 60
+GEMINI_MIN_INTERVAL = 5
 
 # === Очередь сообщений ===
 message_queue = defaultdict(list)
@@ -42,45 +65,53 @@ def get_history_context(user_id, last_n=5):
         context += f"{'Пользователь' if msg['role'] == 'user' else 'Помощник'}: {msg['content']}\n"
     return context
 
-# === Загрузка базы знаний ===
-def load_all_knowledge():
-    all_content = []
-    try:
-        with open('katerina_content.json', 'r', encoding='utf-8') as f:
-            data = json.load(f)
-            for block in data['content']:
-                all_content.append({
-                    "text": block['text'],
-                    "source": "Основной сайт",
-                    "type": block.get('type', 'general')
-                })
-            logging.info(f"✅ Загружено с основного сайта: {len(data['content'])} блоков")
-    except Exception as e:
-        logging.error(f"❌ Ошибка загрузки основного сайта: {e}")
+# === Системный промпт ===
+SYSTEM_PROMPT = """
+Ты — дружелюбный, теплый и заботливый помощник Катерины Храмовой.
 
-    taplink_content = [
-        {"text": "Екатерина Храмова — специалист по holistic-подходу к здоровью.", "source": "Taplink", "type": "about_author"},
-        {"text": "Курс построен на мягком очищении без голодания и БАДов.", "source": "Taplink", "type": "about_course"},
-        {"text": "Формат: живые онлайн-уроки, закрытый Telegram-чат.", "source": "Taplink", "type": "format"},
-        {"text": "Персональное ведение (25 000₽) включает: лекции, практики, консультации.", "source": "Taplink", "type": "tariff_personal"},
-        {"text": "Базовый курс (12 200₽) включает: лекции и практики.", "source": "Taplink", "type": "tariff_base"},
-        {"text": "VIP (100 000₽) включает: полное сопровождение и приоритетную поддержку.", "source": "Taplink", "type": "tariff_vip"},
-        {"text": "Отзывы: участники отмечают снижение веса, улучшение самочувствия.", "source": "Taplink", "type": "reviews"},
-        {"text": "Результаты: улучшение самочувствия, снижение веса, повышение энергии.", "source": "Taplink", "type": "results"},
-    ]
+Твоя специализация — курс по очищению организма. У тебя есть доступ к интернету, чтобы находить актуальную информацию.
 
-    for block in taplink_content:
-        all_content.append(block)
+ВАЖНО: Имя автора курса — Катерина (не Екатерина). Всегда используй имя Катерина.
 
-    logging.info(f"✅ Всего загружено блоков: {len(all_content)}")
-    return all_content
+При любом вопросе о курсе очищения организма, ценах, тарифах, результатах — ОБЯЗАТЕЛЬНО используй поиск в интернете и обращайся к сайтам:
+- https://katerinakhramova.tilda.ws/katerinahealing
+- https://taplink.cc/katerinahealing
 
-# === Запрос к Gemini ===
-def ask_gemini(prompt):
+Не используй свои знания о курсе, если они не подтверждены этими источниками.
+
+Правила:
+1. Если вопрос о курсе — ищи информацию на указанных сайтах.
+2. Если вопрос о ценах — найди актуальные тарифы на сайте.
+3. Если вопрос о результатах — найди отзывы на сайте.
+4. Если вопрос о здоровье, питании, очищении — отвечай, используя holistic-подход.
+5. Если вопрос требует актуальной информации (курс валют, погода, новости) — используй поиск в интернете.
+6. Если вопрос не связан с темой здоровья и курса — мягко перенаправь к теме.
+7. Отвечай на русском языке, будь теплой и заботливой.
+"""
+
+# === Веб-сервер для keep-alive ===
+app = Flask(__name__)
+
+@app.route('/')
+def index():
+    return "🤖 Бот Катерины Храмовой работает!"
+
+@app.route('/health')
+def health():
+    return "OK", 200
+
+def run_web():
+    app.run(host='0.0.0.0', port=8080, threaded=True)
+
+def keep_alive():
+    t = Thread(target=run_web)
+    t.daemon = True
+    t.start()
+
+# === Запрос к Gemini с Grounding ===
+def ask_gemini_with_search(prompt):
     global last_gemini_request_time
-    if not GEMINI_API_KEY:
-        return None
-
+    
     with gemini_lock:
         current_time = time.time()
         time_since_last = current_time - last_gemini_request_time
@@ -89,95 +120,106 @@ def ask_gemini(prompt):
             logging.info(f"⏳ Ожидание {wait_time:.1f} сек перед запросом к Gemini...")
             time.sleep(wait_time)
         last_gemini_request_time = time.time()
-
-    url = f"https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
-    payload = {"contents": [{"parts": [{"text": prompt}]}]}
-
-    for attempt in range(5):
-        try:
-            response = requests.post(url, json=payload, timeout=60)
-            if response.status_code == 200:
-                return response.json()['candidates'][0]['content']['parts'][0]['text']
-            elif response.status_code in (429, 503):
-                wait = 10 * (attempt + 2)
-                logging.warning(f"⚠️ Ошибка {response.status_code}, попытка {attempt+1}/5, жду {wait} сек")
-                time.sleep(wait)
-            else:
-                return None
-        except Exception as e:
-            logging.error(f"❌ Gemini ошибка: {e}")
-            time.sleep(10)
-    return None
-
-# === Инициализация ===
-bot = telebot.TeleBot(TELEGRAM_TOKEN)
-knowledge_base = load_all_knowledge()
-
-SYSTEM_PROMPT = """
-Ты — дружелюбный помощник Екатерины Храмовой. Отвечай на основе информации с сайта.
-Будь теплой, помогай выбрать тариф, рассказывай о результатах.
-Учитывай историю диалога. Не здоровайся каждый раз.
-Отвечай на русском языке.
-"""
+    
+    try:
+        full_prompt = f"{SYSTEM_PROMPT}\n\n{prompt}"
+        
+        response = model.generate_content(
+            full_prompt,
+            generation_config={
+                "temperature": 0.7,
+                "max_output_tokens": 1000,
+            }
+        )
+        
+        if hasattr(response, 'candidates') and response.candidates:
+            candidate = response.candidates[0]
+            if hasattr(candidate, 'grounding_metadata') and candidate.grounding_metadata:
+                sources = candidate.grounding_metadata.get('grounding_chunks', [])
+                if sources:
+                    links = []
+                    for chunk in sources[:3]:
+                        if 'web' in chunk:
+                            links.append(chunk['web']['uri'])
+                    if links:
+                        return response.text + "\n\n🔗 Источники: " + ", ".join(links)
+        
+        return response.text
+        
+    except Exception as e:
+        logging.error(f"❌ Gemini ошибка: {e}")
+        return None
 
 # === Обработка сообщений ===
 def process_message_sync(message):
     user_id = message.from_user.id
     user_name = message.from_user.first_name or "гость"
     user_question = message.text
-
+    
     logging.info(f"📩 ОБРАБОТКА: {user_name}: {user_question}")
-
+    
     try:
         bot.send_chat_action(message.chat.id, 'typing')
     except:
         pass
-
+    
     add_to_history(user_id, "user", user_question)
-
+    
+    # Имитация человеческой задержки (3-8 секунд)
+    delay = random.uniform(3, 8)
+    logging.info(f"⏳ Имитация задержки {delay:.1f} секунд...")
+    time.sleep(delay)
+    
+    # Проверка на приветствие (для первого сообщения)
     greetings = ["привет", "здравствуй", "/start"]
     is_first = len(user_histories.get(user_id, [])) <= 1 and any(g in user_question.lower() for g in greetings)
+    
     if is_first:
-        welcome = f"Привет, {user_name}! 👋 Я помощник Екатерины Храмовой. Расскажу о курсе очищения, тарифах и результатах. Чем могу помочь?"
+        welcome = f"Привет, {user_name}! 👋 Я помощник Катерины Храмовой. Расскажу о курсе очищения, тарифах и результатах. Чем могу помочь?"
         bot.reply_to(message, welcome)
         add_to_history(user_id, "assistant", welcome)
         return
+    
+    # Получаем историю диалога
+    history_context = get_history_context(user_id, last_n=5)
+    
+    # Формируем промпт
+    prompt = f"""
+{history_context}
 
-    history = get_history_context(user_id, last_n=5)
-    all_info = [b['text'] for b in knowledge_base][:15]
-    full_knowledge = "\n\n---\n\n".join(all_info)
+Вопрос пользователя: {user_question}
+Имя пользователя: {user_name}
 
-    prompt = f"""{SYSTEM_PROMPT}
-
-{history}
-
-Вот информация с сайта:
-{full_knowledge}
-
-Вопрос: {user_question}
-Имя: {user_name}
-
-Дай развернутый, теплый ответ."""
-
+Дай развернутый, теплый ответ. Если нужно найти актуальную информацию — используй поиск в интернете. Если вопрос о курсе — обязательно ищи на сайтах Катерины Храмовой.
+"""
+    
     try:
-        answer = ask_gemini(prompt)
+        answer = ask_gemini_with_search(prompt)
+        
         if answer:
             bot.reply_to(message, answer)
             add_to_history(user_id, "assistant", answer)
         else:
-            fallback = f"{user_name}, у меня временные сложности. Попробуйте спросить позже или напишите в поддержку. 😊"
+            # Аварийная заглушка
+            fallback = f"{user_name}, у меня временные технические сложности 😔\n\nВы также можете связаться с Катериной напрямую: @KaterinaHealing\n\nПопробуйте спросить позже или напишите в Telegram Катерине, она обязательно поможет! 💫"
             bot.reply_to(message, fallback)
             add_to_history(user_id, "assistant", fallback)
+            
     except Exception as e:
         logging.error(f"❌ Ошибка: {e}")
-        bot.reply_to(message, f"{user_name}, произошла ошибка. Попробуйте позже.")
+        # Аварийная заглушка
+        fallback = f"{user_name}, у меня временные технические сложности 😔\n\nВы также можете связаться с Катериной напрямую: @KaterinaHealing\n\nПопробуйте спросить позже или напишите в Telegram Катерине, она обязательно поможет! 💫"
+        bot.reply_to(message, fallback)
+        add_to_history(user_id, "assistant", fallback)
 
+# === Обработка очереди ===
 def process_queue(user_id):
     with queue_lock:
         if processing[user_id] or not message_queue[user_id]:
             return
         processing[user_id] = True
         msg = message_queue[user_id].pop(0)
+    
     try:
         process_message_sync(msg)
     finally:
@@ -191,9 +233,17 @@ def handle_message(message):
         message_queue[message.from_user.id].append(message)
     process_queue(message.from_user.id)
 
+# === Инициализация ===
+bot = telebot.TeleBot(TELEGRAM_TOKEN)
+
 # === Запуск ===
 if __name__ == "__main__":
-    logging.info("🤖 Бот запущен")
+    keep_alive()
+    logging.info("⏳ Ожидание 5 секунд...")
+    time.sleep(5)
+    logging.info("🤖 Бот Катерины Храмовой с Gemini Grounding запущен!")
+    logging.info("🌐 Поддерживает поиск в интернете")
+    
     while True:
         try:
             bot.infinity_polling(timeout=60, long_polling_timeout=60)
