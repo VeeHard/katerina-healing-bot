@@ -1,11 +1,12 @@
-# bot.py - исправленная версия с правильным Grounding
+# bot.py - с прямыми HTTP-запросами к Gemini API и Grounding
 import os
 import sys
 import logging
 import telebot
 import time
 import random
-import google.generativeai as genai
+import requests
+import json
 from flask import Flask
 from threading import Thread
 from collections import defaultdict
@@ -24,24 +25,6 @@ if not TELEGRAM_TOKEN:
     logging.error("❌ TELEGRAM_TOKEN не задан!")
 if not GEMINI_API_KEY:
     logging.error("❌ GEMINI_API_KEY не задан!")
-
-# === Настройка Gemini с Grounding ===
-genai.configure(api_key=GEMINI_API_KEY)
-
-# Правильный способ включить Google Search Grounding в версии 0.3.2
-grounding_config = {
-    "googleSearch": {}  # Включает поиск в интернете
-}
-
-# Настраиваем модель
-model = genai.GenerativeModel(
-    model_name="gemini-2.0-flash",
-    generation_config={
-        "temperature": 0.7,
-        "max_output_tokens": 1000,
-    },
-    tools=[{"google_search": {}}]  # Правильный синтаксис для инструментов
-)
 
 # === Глобальный таймер для Gemini ===
 last_gemini_request_time = 0
@@ -114,7 +97,7 @@ def keep_alive():
     t.daemon = True
     t.start()
 
-# === Запрос к Gemini с Grounding ===
+# === Запрос к Gemini с Grounding через REST API ===
 def ask_gemini_with_search(prompt):
     global last_gemini_request_time
     
@@ -130,16 +113,43 @@ def ask_gemini_with_search(prompt):
     try:
         full_prompt = f"{SYSTEM_PROMPT}\n\n{prompt}"
         
-        # Отправляем запрос с включённым поиском
-        response = model.generate_content(
-            full_prompt,
-            tools=[{"google_search": {}}]  # Включаем поиск в запросе
-        )
+        # Формируем запрос к Gemini API с включённым поиском
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
         
-        return response.text
+        payload = {
+            "contents": [{
+                "parts": [{"text": full_prompt}]
+            }],
+            "tools": [{
+                "googleSearch": {}  # Включаем Google Search Grounding
+            }]
+        }
         
+        response = requests.post(url, json=payload, timeout=60)
+        
+        if response.status_code == 200:
+            result = response.json()
+            # Извлекаем текст ответа
+            answer = result['candidates'][0]['content']['parts'][0]['text']
+            
+            # Если есть ссылки на источники, добавляем их
+            if 'groundingMetadata' in result['candidates'][0]:
+                sources = result['candidates'][0]['groundingMetadata'].get('groundingChunks', [])
+                if sources:
+                    links = []
+                    for chunk in sources[:3]:
+                        if 'web' in chunk:
+                            links.append(chunk['web']['uri'])
+                    if links:
+                        answer += f"\n\n🔗 Источники: " + ", ".join(links)
+            
+            return answer
+        else:
+            logging.error(f"❌ Gemini ошибка {response.status_code}: {response.text[:200]}")
+            return None
+            
     except Exception as e:
-        logging.error(f"❌ Gemini ошибка: {e}")
+        logging.error(f"❌ Gemini исключение: {e}")
         return None
 
 # === Обработка сообщений ===
