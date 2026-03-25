@@ -205,6 +205,7 @@ def process_message_sync(message):
             bot.reply_to(message, answer)
             add_to_history(user_id, "assistant", answer)
         else:
+            # Gemini вернул None (ошибка 429, 503 и т.д.)
             fallback = f"{user_name}, у меня временные технические сложности 😔\n\nВы также можете связаться с Катериной напрямую: @KaterinaHealing\n\nПопробуйте спросить позже или напишите в Telegram Катерине, она обязательно поможет! 💫"
             bot.reply_to(message, fallback)
             add_to_history(user_id, "assistant", fallback)
