@@ -1,4 +1,4 @@
-# bot_gemini_grounding.py - бот с Google Search Grounding
+# bot.py - исправленная версия с правильным Grounding
 import os
 import sys
 import logging
@@ -28,13 +28,19 @@ if not GEMINI_API_KEY:
 # === Настройка Gemini с Grounding ===
 genai.configure(api_key=GEMINI_API_KEY)
 
-# Создаём инструмент для поиска в интернете
-grounding_tool = genai.Tool(google_search={})
+# Правильный способ включить Google Search Grounding в версии 0.3.2
+grounding_config = {
+    "googleSearch": {}  # Включает поиск в интернете
+}
 
-# Настраиваем модель с включённым поиском
+# Настраиваем модель
 model = genai.GenerativeModel(
     model_name="gemini-2.0-flash",
-    tools=[grounding_tool]
+    generation_config={
+        "temperature": 0.7,
+        "max_output_tokens": 1000,
+    },
+    tools=[{"google_search": {}}]  # Правильный синтаксис для инструментов
 )
 
 # === Глобальный таймер для Gemini ===
@@ -124,25 +130,11 @@ def ask_gemini_with_search(prompt):
     try:
         full_prompt = f"{SYSTEM_PROMPT}\n\n{prompt}"
         
+        # Отправляем запрос с включённым поиском
         response = model.generate_content(
             full_prompt,
-            generation_config={
-                "temperature": 0.7,
-                "max_output_tokens": 1000,
-            }
+            tools=[{"google_search": {}}]  # Включаем поиск в запросе
         )
-        
-        if hasattr(response, 'candidates') and response.candidates:
-            candidate = response.candidates[0]
-            if hasattr(candidate, 'grounding_metadata') and candidate.grounding_metadata:
-                sources = candidate.grounding_metadata.get('grounding_chunks', [])
-                if sources:
-                    links = []
-                    for chunk in sources[:3]:
-                        if 'web' in chunk:
-                            links.append(chunk['web']['uri'])
-                    if links:
-                        return response.text + "\n\n🔗 Источники: " + ", ".join(links)
         
         return response.text
         
@@ -200,14 +192,12 @@ def process_message_sync(message):
             bot.reply_to(message, answer)
             add_to_history(user_id, "assistant", answer)
         else:
-            # Аварийная заглушка
             fallback = f"{user_name}, у меня временные технические сложности 😔\n\nВы также можете связаться с Катериной напрямую: @KaterinaHealing\n\nПопробуйте спросить позже или напишите в Telegram Катерине, она обязательно поможет! 💫"
             bot.reply_to(message, fallback)
             add_to_history(user_id, "assistant", fallback)
             
     except Exception as e:
         logging.error(f"❌ Ошибка: {e}")
-        # Аварийная заглушка
         fallback = f"{user_name}, у меня временные технические сложности 😔\n\nВы также можете связаться с Катериной напрямую: @KaterinaHealing\n\nПопробуйте спросить позже или напишите в Telegram Катерине, она обязательно поможет! 💫"
         bot.reply_to(message, fallback)
         add_to_history(user_id, "assistant", fallback)
