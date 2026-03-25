@@ -26,6 +26,9 @@ if not TELEGRAM_TOKEN:
 if not GEMINI_API_KEY:
     logging.error("❌ GEMINI_API_KEY не задан!")
 
+# === Инициализация бота (В НАЧАЛЕ!) ===
+bot = telebot.TeleBot(TELEGRAM_TOKEN)
+
 # === Глобальный таймер для Gemini ===
 last_gemini_request_time = 0
 gemini_lock = Lock()
@@ -232,9 +235,6 @@ def handle_message(message):
     with queue_lock:
         message_queue[message.from_user.id].append(message)
     process_queue(message.from_user.id)
-
-# === Инициализация ===
-bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
 # === Запуск ===
 if __name__ == "__main__":
